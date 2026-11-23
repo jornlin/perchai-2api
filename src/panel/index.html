@@ -46,7 +46,7 @@
         <table>
           <thead><tr>
             <th>状态</th><th>账号</th><th>邮箱</th><th>套餐</th><th>令牌到期</th>
-            <th class="n">并发</th><th class="n">请求</th><th class="n">错误</th><th>API Key</th><th>操作</th>
+            <th class="n">本月 PT / 额度</th><th class="n">并发</th><th class="n">请求</th><th class="n">错误</th><th>API Key</th><th>操作</th>
           </tr></thead>
           <tbody id="acc-body"></tbody>
         </table>
@@ -57,7 +57,7 @@
     <section class="card">
       <div class="card-head">
         <h2>可用模型</h2>
-        <span class="muted mono" id="model-count"></span>
+        <span class="muted">1 PT = $0.001，费用取上游计费接口</span>
       </div>
       <div class="models" id="models"><span class="muted">加载中…</span></div>
     </section>
@@ -85,7 +85,7 @@
       <div class="card-head"><h2>最近请求</h2><span class="muted mono" id="log-count"></span></div>
       <div class="tbl-wrap req-wrap">
         <table>
-          <thead><tr><th>时间</th><th>账号</th><th>模型</th><th class="n">状态</th><th class="n">耗时</th><th class="n">tokens</th></tr></thead>
+          <thead><tr><th>时间</th><th>账号</th><th>模型</th><th class="n">状态</th><th class="n">耗时</th><th class="n">tokens</th><th class="n">PT</th></tr></thead>
           <tbody id="log-body"></tbody>
         </table>
       </div>

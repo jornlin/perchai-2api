@@ -62,6 +62,7 @@ class AccountStore {
           label: typeof e.label === "string" ? e.label : e.name,
           enabled: e.enabled !== false,
           createdAt: e.createdAt || null,
+          allowancePt: Number.isFinite(e.allowancePt) ? e.allowancePt : 20000,
         }));
     }
   }
@@ -90,7 +91,7 @@ class AccountStore {
     const accountKey = key || newKey();
     if (this.entries.some((e) => e.key === accountKey)) throw Object.assign(new Error("API key 已被其它账号占用"), { status: 409 });
     fs.mkdirSync(path.dirname(this.sessionPath(name)), { recursive: true, mode: 0o700 });
-    const entry = { name, key: accountKey, label: label || name, enabled: true, createdAt: new Date().toISOString() };
+    const entry = { name, key: accountKey, label: label || name, enabled: true, createdAt: new Date().toISOString(), allowancePt: 20000 };
     this.entries.push(entry);
     this.save();
     return { ...entry };
@@ -116,6 +117,7 @@ class AccountStore {
     }
     if (typeof patch.label === "string" && patch.label.trim()) e.label = patch.label.trim();
     if (typeof patch.enabled === "boolean") e.enabled = patch.enabled;
+    if (Number.isFinite(patch.allowancePt) && patch.allowancePt >= 0) e.allowancePt = patch.allowancePt;
     this.save();
     return { ...e };
   }
@@ -137,4 +139,53 @@ class AccountStore {
   }
 }
 
-module.exports = { AccountStore, newKey, validName, SESSION_FILE };
+// Monthly spend ledger, persisted so the panel survives restarts.
+// One PT = $0.001 of metered usage; costs come from Perch's own usage endpoint.
+class UsageLedger {
+  constructor({ dataDir }) {
+    this.file = path.join(dataDir, "usage.json");
+    this.data = {};
+    try {
+      this.data = JSON.parse(fs.readFileSync(this.file, "utf8")) || {};
+    } catch {
+      this.data = {};
+    }
+  }
+
+  static monthKey(d = new Date()) {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+
+  add(name, { costUsd = 0, tokens = 0, requests = 1 }) {
+    const month = UsageLedger.monthKey();
+    const bucket = (this.data[month] ||= {});
+    const row = (bucket[name] ||= { costUsd: 0, tokens: 0, requests: 0 });
+    row.costUsd += Number(costUsd) || 0;
+    row.tokens += Number(tokens) || 0;
+    row.requests += requests;
+    this.save();
+  }
+
+  month(name) {
+    const row = this.data[UsageLedger.monthKey()]?.[name];
+    return row ? { ...row } : { costUsd: 0, tokens: 0, requests: 0 };
+  }
+
+  total() {
+    const bucket = this.data[UsageLedger.monthKey()] || {};
+    return Object.values(bucket).reduce(
+      (a, r) => ({ costUsd: a.costUsd + (r.costUsd || 0), tokens: a.tokens + (r.tokens || 0), requests: a.requests + (r.requests || 0) }),
+      { costUsd: 0, tokens: 0, requests: 0 },
+    );
+  }
+
+  save() {
+    try {
+      const tmp = `${this.file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+      fs.renameSync(tmp, this.file);
+    } catch {}
+  }
+}
+
+module.exports = { AccountStore, UsageLedger, newKey, validName, SESSION_FILE };

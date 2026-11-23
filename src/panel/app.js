@@ -92,6 +92,8 @@ function render(d) {
     ["请求", fmtNum(k.requests), ""],
     ["错误", fmtNum(k.errors), k.errors ? "bad" : ""],
     ["Tokens", fmtNum(k.tokens), ""],
+    ["本月 PT", fmtNum(k.monthPt), k.monthPt ? "warn" : ""],
+    ["本月花费", `$${(k.monthUsd || 0).toFixed(4)}`, ""],
   ];
   $("#kpis").innerHTML = cards.map(([label, v, cls]) =>
     `<div class="kpi"><div class="k">${label}</div><div class="v ${cls}">${v}</div></div>`).join("");
@@ -125,6 +127,7 @@ function render(d) {
       <td>${a.email ? esc(a.email) : `<span class="muted">—</span>`}</td>
       <td>${plan}</td>
       <td>${exp}</td>
+      <td class="n mono" data-act="allowance" data-name="${esc(a.name)}" title="点击修改额度 · 剩余 ${fmtNum(a.remainingPt)} PT" style="cursor:pointer">${fmtNum(a.spentPt)} / ${fmtNum(a.allowancePt)}</td>
       <td class="n mono">${a.activeRequests}${a.queued ? ` / ${a.queued}q` : ""}</td>
       <td class="n mono">${fmtNum(a.requests)}</td>
       <td class="n mono">${a.errors ? `<span style="color:var(--bad)">${fmtNum(a.errors)}</span>` : "0"}</td>
@@ -146,6 +149,7 @@ function render(d) {
       <td class="n"><span class="pill ${cls}">${l.status ?? "—"}</span></td>
       <td class="n mono">${l.ms != null ? `${l.ms}ms` : "—"}</td>
       <td class="n mono">${fmtNum(l.tokens)}</td>
+      <td class="n mono">${l.costUsd != null ? (l.costUsd * 1000).toFixed(2) : "—"}</td>
     </tr>`;
   }).join("");
   $("#log-empty").classList.toggle("hidden", logs.length > 0);
@@ -191,7 +195,8 @@ async function runTest() {
         prompt: $("#test-prompt").value,
       }),
     });
-    $("#test-meta").textContent = `${r.ok ? "成功" : "失败"} · HTTP ${r.status} · ${r.ms}ms · ${r.model || ""}${r.usage ? ` · ${r.usage.total_tokens} tokens` : ""}`;
+    const cost = r.costUsd != null ? ` · $${r.costUsd.toFixed(5)}（${(r.costUsd * 1000).toFixed(2)} PT）` : "";
+    $("#test-meta").textContent = `${r.ok ? "成功" : "失败"} · HTTP ${r.status} · ${r.ms}ms · ${r.model || ""}${r.usage ? ` · ${r.usage.total_tokens} tokens` : ""}${cost}`;
     out.textContent = r.ok ? r.content : `错误：${r.error || "未知错误"}`;
     out.classList.toggle("bad", !r.ok);
     out.classList.remove("hidden");
@@ -208,10 +213,19 @@ async function runTest() {
 
 // ---- actions ------------------------------------------------------------
 async function onTableClick(ev) {
-  const btn = ev.target.closest("button[data-act]");
+  const btn = ev.target.closest("[data-act]");
   if (!btn) return;
   const { act, name, enabled } = btn.dataset;
   try {
+    if (act === "allowance") {
+      const cur = (state.data?.accounts || []).find((x) => x.name === name)?.allowancePt ?? 20000;
+      const v = prompt(`设置 ${name} 的每月额度（PT，1 PT = $0.001）`, String(cur));
+      if (v == null) return;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return toast("额度必须是非负数字");
+      await api(`/accounts/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ allowancePt: n }) });
+      return load();
+    }
     if (act === "login") return openLogin(name);
     if (act === "refresh") {
       btn.disabled = true;

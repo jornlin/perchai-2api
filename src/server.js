@@ -11,7 +11,7 @@ const { CLI_MODELS, prepareCliRequest, runCliChat } = require("./cli");
 const { FixedWindowRateLimit } = require("./limiter");
 const { log, readJsonBody, readStream, now, randomId } = require("./util");
 const { openAIError, toChatCompletion, parsePerchLine, upstreamError, normalizeUsage, finishReasonOf } = require("./translate");
-const { AccountStore } = require("./store");
+const { AccountStore, UsageLedger } = require("./store");
 const { createAdmin } = require("./admin");
 
 // Small bounded event log for the admin panel.
@@ -50,6 +50,7 @@ function buildApp(cfg) {
   let defaultAccount = null;
   const accountBySessionPath = new Map();
   const store = new AccountStore({ dataDir: cfg.dataDir });
+  const ledger = new UsageLedger({ dataDir: cfg.dataDir });
   const byName = new Map(); // account name -> Account (admin panel registry)
   const stats = new Map(); // account name -> counters
   const reqLog = new RingLog(300);
@@ -121,7 +122,7 @@ function buildApp(cfg) {
     if (cfg.clientKey) accounts.set(cfg.clientKey, defaultAccount);
   }
 
-  const admin = createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log });
+  const admin = createAdmin({ cfg, store, ledger, getAccount, listAccounts, stats, reqLog, log });
 
   // ---- rate limiters per client key ------------------------------------
   const rateLimiters = new Map();
@@ -171,7 +172,7 @@ function buildApp(cfg) {
     res.end(body);
   }
 
-  function requestLog(req, res, { account, model, tokens, durationMs, status }) {
+  function requestLog(req, res, { account, model, tokens, costUsd, durationMs, status }) {
     const finalStatus = status ?? res.statusCode;
     const name = account?.name || account?.label || null;
     if (name) {
@@ -179,11 +180,13 @@ function buildApp(cfg) {
       s.requests += 1;
       if (finalStatus >= 400) s.errors += 1;
       if (Number.isFinite(tokens)) s.tokens += tokens;
+      if (Number.isFinite(costUsd)) s.costUsd = (s.costUsd || 0) + costUsd;
       s.lastAt = Date.now();
       s.lastStatus = finalStatus;
       stats.set(name, s);
     }
-    reqLog.push({ ts: Date.now(), account: name, model: model || null, status: finalStatus, ms: durationMs ?? null, tokens: Number.isFinite(tokens) ? tokens : null });
+    reqLog.push({ ts: Date.now(), account: name, model: model || null, status: finalStatus, ms: durationMs ?? null, tokens: Number.isFinite(tokens) ? tokens : null, costUsd: Number.isFinite(costUsd) ? costUsd : null });
+    if (name && (Number.isFinite(costUsd) || Number.isFinite(tokens))) ledger.add(name, { costUsd: costUsd || 0, tokens: tokens || 0 });
     if (cfg.logLevel === 0) return;
     log(
       "info",
@@ -232,7 +235,7 @@ function buildApp(cfg) {
           const data = await runCliChat(account, prepared, { cfg, signal: ac.signal });
           if (res.destroyed) return;
           const out = toChatCompletion(data, prepared.model);
-          requestLog(req, res, { account, model: out.model, tokens: out.usage?.total_tokens, durationMs: Date.now() - startMs, status: 200 });
+          requestLog(req, res, { account, model: out.model, tokens: out.usage?.total_tokens, costUsd: data.costUsd, durationMs: Date.now() - startMs, status: 200 });
           if (stream) return sendCliStream(res, out, body.stream_options?.include_usage === true);
           return sendJSON(res, 200, out);
         }

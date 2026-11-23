@@ -56,6 +56,7 @@ function toChatCompletion(data, modelName, id) {
     model: data.model || modelName,
     choices: [{ index: 0, message, finish_reason: finishReasonOf(data), logprobs: null }],
     ...(usage ? { usage } : {}),
+    ...(Number.isFinite(data.costUsd) ? { cost_usd: data.costUsd } : {}),
   };
 }
 

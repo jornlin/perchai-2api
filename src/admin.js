@@ -131,7 +131,7 @@ async function probePlan(cfg, token) {
   }
 }
 
-function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log }) {
+function createAdmin({ cfg, store, ledger, getAccount, listAccounts, stats, reqLog, log }) {
   const adminToken = process.env.PERCH_ADMIN_TOKEN?.trim() || loadOrCreateAdminToken(cfg.dataDir);
   const pending = new Map(); // name -> { verifier, provider, at }
 
@@ -173,6 +173,9 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
     const st = stats.get(entry.name) || { requests: 0, errors: 0, tokens: 0 };
     const now = Math.floor(Date.now() / 1000);
     const sem = acc && (cfg.backend === "cli" ? acc.cliSemaphore : acc.semaphore);
+    const used = ledger.month(entry.name);
+    const spentPt = Math.round((used.costUsd || 0) * 1000);
+    const allowancePt = Number.isFinite(entry.allowancePt) ? entry.allowancePt : 20000;
     return {
       name: entry.name,
       label: entry.label,
@@ -190,6 +193,10 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
       requests: st.requests,
       errors: st.errors,
       tokens: st.tokens,
+      spentPt,
+      allowancePt,
+      remainingPt: Math.max(0, allowancePt - spentPt),
+      month: { costUsd: used.costUsd || 0, pt: spentPt, tokens: used.tokens || 0, requests: used.requests || 0 },
       lastAt: st.lastAt || null,
       lastStatus: st.lastStatus ?? null,
       lastError: st.lastError || null,
@@ -207,6 +214,7 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
       }),
       { requests: 0, errors: 0, tokens: 0 },
     );
+    const month = ledger.total();
     return {
       ok: true,
       backend: cfg.backend || "http",
@@ -214,6 +222,8 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
       uptimeSec: Math.round(process.uptime()),
       kpis: {
         accounts: accounts.length,
+        monthPt: Math.round((month.costUsd || 0) * 1000),
+        monthUsd: month.costUsd || 0,
         healthy: accounts.filter((a) => a.configured && a.enabled && a.planRequired !== true && (a.expiresInSec == null || a.expiresInSec > 0)).length,
         attention: accounts.filter((a) => !a.configured || a.enabled === false || a.planRequired === true || (a.expiresInSec != null && a.expiresInSec <= 0)).length,
         ...totals,
@@ -304,6 +314,7 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
           model: data?.model || payload.model,
           content,
           usage: data?.usage || null,
+          costUsd: Number.isFinite(data?.cost_usd) ? data.cost_usd : null,
           error: data?.error?.message || (status === 200 ? null : `HTTP ${status}`),
         });
       }

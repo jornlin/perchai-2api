@@ -86,7 +86,27 @@ function runProcess(entry, args, { cwd, env, signal, timeoutMs }) {
   });
 }
 
-function completionFromCli(result, requestedModel) {
+// Perch's own usage endpoint prices a finished run; best effort, never blocks the reply.
+async function fetchRunCost(account, runId, cfg) {
+  const token = account?.session?.accessToken;
+  if (!token || !runId) return null;
+  try {
+    const res = await fetch(`${cfg.appUrl}/api/perch-terminal/usage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, Accept: "application/json" },
+      body: JSON.stringify({ runIds: [runId] }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return null;
+    const d = await res.json().catch(() => null);
+    const c = d?.summary?.estimatedCostUsd;
+    return Number.isFinite(c) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function completionFromCli(result, requestedModel, costUsd = null) {
   const snapshot = result.contextSnapshot;
   const usage = snapshot?.turnApiUsage;
   const output = usage?.outputTokens;
@@ -96,6 +116,7 @@ function completionFromCli(result, requestedModel) {
     text: result.assistantText,
     model: snapshot?.modelId || requestedModel,
     finishReason: "stop",
+    ...(costUsd != null ? { costUsd } : {}),
     ...(Number.isFinite(total) && Number.isFinite(output) && total >= output ? { usage: {
       prompt_tokens: total - output,
       completion_tokens: output,
@@ -124,7 +145,8 @@ async function runCliChat(account, prepared, { cfg, signal }) {
     const args = ["run", prepared.prompt, "--json", "--mode", "ask", "--permission", "plan", "--no-local-tools", "--model", prepared.model];
     if (prepared.effort != null) args.push("--effort", prepared.effort);
     const result = await runProcess(cfg.cliEntry, args, { cwd, env, signal, timeoutMs: cfg.cliTimeoutMs });
-    return completionFromCli(result, prepared.model);
+    const costUsd = await fetchRunCost(account, result.runId, cfg);
+    return completionFromCli(result, prepared.model, costUsd);
   } finally {
     try { if (cwd) await fs.rm(cwd, { recursive: true, force: true }); }
     finally { release(); }
