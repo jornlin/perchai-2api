@@ -212,8 +212,8 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
       uptimeSec: Math.round(process.uptime()),
       kpis: {
         accounts: accounts.length,
-        healthy: accounts.filter((a) => a.configured && a.enabled && a.planRequired !== true).length,
-        attention: accounts.filter((a) => !a.configured || a.enabled === false || a.planRequired === true).length,
+        healthy: accounts.filter((a) => a.configured && a.enabled && a.planRequired !== true && (a.expiresInSec == null || a.expiresInSec > 0)).length,
+        attention: accounts.filter((a) => !a.configured || a.enabled === false || a.planRequired === true || (a.expiresInSec != null && a.expiresInSec <= 0)).length,
         ...totals,
       },
       accounts,
