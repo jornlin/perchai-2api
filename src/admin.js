@@ -6,6 +6,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
+const { CLI_MODELS } = require("./cli");
+
 const PANEL_DIR = path.join(__dirname, "panel");
 const decoder = (buf) => buf.toString("utf8");
 
@@ -258,6 +260,53 @@ function createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log 
       }
 
       if (resource === "logs" && method === "GET") return send(res, 200, { ok: true, logs: reqLog.list() });
+
+      if (resource === "models" && method === "GET") {
+        if (cfg.backend === "cli") return send(res, 200, { ok: true, models: CLI_MODELS });
+        const entry = store.list().find((e) => e.enabled);
+        if (!entry) return send(res, 200, { ok: true, models: [] });
+        const r = await fetch(`http://127.0.0.1:${cfg.port}/v1/models`, {
+          headers: { Authorization: `Bearer ${entry.key}` },
+          signal: AbortSignal.timeout(10_000),
+        }).then((x) => x.json()).catch(() => null);
+        return send(res, 200, { ok: true, models: (r?.data || []).map((m) => m.id) });
+      }
+
+      if (resource === "test" && method === "POST") {
+        const body = await readJson(req);
+        const entry = body.account ? store.get(body.account) : store.list().find((e) => e.enabled);
+        if (!entry) return send(res, 400, { ok: false, error: "没有可用账号" });
+        const started = Date.now();
+        const payload = {
+          model: body.model || (cfg.backend === "cli" ? "auto" : "default"),
+          messages: [{ role: "user", content: String(body.prompt || "你好") }],
+        };
+        let status = 0;
+        let data = null;
+        try {
+          const r = await fetch(`http://127.0.0.1:${cfg.port}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${entry.key}` },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(180_000),
+          });
+          status = r.status;
+          data = await r.json().catch(() => null);
+        } catch (e) {
+          return send(res, 200, { ok: false, status: 0, ms: Date.now() - started, account: entry.name, error: e.message });
+        }
+        const content = data?.choices?.[0]?.message?.content ?? null;
+        return send(res, 200, {
+          ok: status === 200 && !data?.error,
+          status,
+          ms: Date.now() - started,
+          account: entry.name,
+          model: data?.model || payload.model,
+          content,
+          usage: data?.usage || null,
+          error: data?.error?.message || (status === 200 ? null : `HTTP ${status}`),
+        });
+      }
 
       if (resource === "accounts" && !name) {
         if (method === "GET") return send(res, 200, { ok: true, accounts: store.list().map(accountStatus) });

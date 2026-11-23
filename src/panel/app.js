@@ -69,6 +69,7 @@ async function unlock(token) {
     $("#gate-err").textContent = "";
     $("#app").classList.remove("hidden");
     await load();
+    await loadModels();
     clearInterval(state.timer);
     state.timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
   } catch (e) {
@@ -153,6 +154,56 @@ function render(d) {
 async function load() {
   const d = await api("/overview");
   render(d);
+  renderTestAccounts(d.accounts);
+}
+
+function renderTestAccounts(accounts) {
+  const sel = $("#test-account");
+  const prev = sel.value;
+  sel.innerHTML = accounts.map((a) => `<option value="${esc(a.name)}">${esc(a.name)}${a.email ? ` · ${esc(a.email)}` : ""}</option>`).join("");
+  if (accounts.some((a) => a.name === prev)) sel.value = prev;
+}
+
+async function loadModels() {
+  try {
+    const r = await api("/models");
+    state.models = r.models || [];
+    $("#model-count").textContent = state.models.length ? `${state.models.length} 个` : "";
+    $("#models").innerHTML = state.models.map((m) => `<button class="chip" data-model="${esc(m)}">${esc(m)}</button>`).join("");
+    $("#test-model").innerHTML = state.models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  } catch (e) {
+    $("#models").innerHTML = `<span class="muted">加载失败：${esc(e.message)}</span>`;
+  }
+}
+
+async function runTest() {
+  const btn = $("#test-go");
+  const out = $("#test-out");
+  btn.disabled = true;
+  $("#test-meta").textContent = "请求中…（CLI 后端通常 10–20 秒）";
+  out.classList.add("hidden");
+  try {
+    const r = await api("/test", {
+      method: "POST",
+      body: JSON.stringify({
+        model: $("#test-model").value,
+        account: $("#test-account").value,
+        prompt: $("#test-prompt").value,
+      }),
+    });
+    $("#test-meta").textContent = `${r.ok ? "成功" : "失败"} · HTTP ${r.status} · ${r.ms}ms · ${r.model || ""}${r.usage ? ` · ${r.usage.total_tokens} tokens` : ""}`;
+    out.textContent = r.ok ? r.content : `错误：${r.error || "未知错误"}`;
+    out.classList.toggle("bad", !r.ok);
+    out.classList.remove("hidden");
+    return load();
+  } catch (e) {
+    $("#test-meta").textContent = "";
+    out.textContent = e.message;
+    out.classList.add("bad");
+    out.classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ---- actions ------------------------------------------------------------
@@ -248,6 +299,16 @@ $("#gate-token").addEventListener("keydown", (e) => { if (e.key === "Enter") unl
 $("#logout").addEventListener("click", lock);
 $("#refresh").addEventListener("click", () => load().then(() => toast("已刷新")).catch((e) => toast(e.message)));
 $("#acc-body").addEventListener("click", onTableClick);
+$("#models").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  $("#test-model").value = chip.dataset.model;
+  document.querySelectorAll("#models .chip").forEach((c) => c.classList.toggle("on", c === chip));
+});
+$("#test-model").addEventListener("change", () => {
+  document.querySelectorAll("#models .chip").forEach((c) => c.classList.toggle("on", c.dataset.model === $("#test-model").value));
+});
+$("#test-go").addEventListener("click", runTest);
 $("#modal-close").addEventListener("click", closeModal);
 $("#open-login").addEventListener("click", startLogin);
 $("#finish-login").addEventListener("click", finishLogin);

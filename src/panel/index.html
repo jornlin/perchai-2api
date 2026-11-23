@@ -55,6 +55,33 @@
     </section>
 
     <section class="card">
+      <div class="card-head">
+        <h2>可用模型</h2>
+        <span class="muted mono" id="model-count"></span>
+      </div>
+      <div class="models" id="models"><span class="muted">加载中…</span></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>API 测试</h2>
+        <span class="muted">经本机网关转发，和真实调用同一条链路</span>
+      </div>
+      <div class="test-box">
+        <div class="row">
+          <select id="test-model" class="input"></select>
+          <select id="test-account" class="input"></select>
+        </div>
+        <textarea id="test-prompt" class="input mono" rows="3" placeholder="输入测试内容，例如：用一句话介绍你自己">你好</textarea>
+        <div class="row">
+          <button id="test-go" class="btn primary">发送测试</button>
+          <span id="test-meta" class="muted mono"></span>
+        </div>
+        <pre id="test-out" class="out mono hidden"></pre>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="card-head"><h2>最近请求</h2><span class="muted mono" id="log-count"></span></div>
       <div class="tbl-wrap req-wrap">
         <table>

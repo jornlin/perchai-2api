@@ -60,6 +60,16 @@ tbody tr:last-child td{border-bottom:none}
 .pill.bad{background:var(--bad-soft);color:var(--bad)}
 .pill.mute{background:var(--raise);color:var(--ink-3)}
 
+/* models + test */
+.models{display:flex;flex-wrap:wrap;gap:8px;padding:14px 16px}
+.chip{font:12px/1 var(--mono);padding:6px 10px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);cursor:pointer}
+.chip:hover{border-color:var(--accent);color:var(--ink)}
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.test-box{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.test-box .row{margin:0}
+.out{margin:0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6;max-height:280px;overflow:auto}
+.out.bad{color:var(--bad);border-color:#43292c}
+
 /* controls */
 .input,.btn{font:13px var(--sans);border-radius:9px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);padding:8px 11px;outline:none}
 .input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
