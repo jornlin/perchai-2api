@@ -2,6 +2,8 @@
 // HTTP server: OpenAI-compatible API surface backed by Perch's model-call gateway.
 
 const http = require("node:http");
+const path = require("node:path");
+const fs = require("node:fs");
 const { readEnv } = require("./config");
 const { Account, setMaxSockets } = require("./session");
 const { modelCall, embeddings, usageMeter, defaultModel } = require("./perch");
@@ -9,6 +11,18 @@ const { CLI_MODELS, prepareCliRequest, runCliChat } = require("./cli");
 const { FixedWindowRateLimit } = require("./limiter");
 const { log, readJsonBody, readStream, now, randomId } = require("./util");
 const { openAIError, toChatCompletion, parsePerchLine, upstreamError, normalizeUsage, finishReasonOf } = require("./translate");
+const { AccountStore } = require("./store");
+const { createAdmin } = require("./admin");
+
+// Small bounded event log for the admin panel.
+class RingLog {
+  constructor(limit) { this.limit = limit; this.items = []; }
+  push(item) {
+    this.items.unshift(item);
+    if (this.items.length > this.limit) this.items.length = this.limit;
+  }
+  list() { return this.items.slice(); }
+}
 
 const HOSTED_MODELS = [
   "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna",
@@ -35,12 +49,61 @@ function buildApp(cfg) {
   const accounts = new Map(); // api key -> Account
   let defaultAccount = null;
   const accountBySessionPath = new Map();
+  const store = new AccountStore({ dataDir: cfg.dataDir });
+  const byName = new Map(); // account name -> Account (admin panel registry)
+  const stats = new Map(); // account name -> counters
+  const reqLog = new RingLog(300);
+  let storeCount = 0;
 
   const makeAccount = (a) => {
     a.userAgent = cfg.userAgent;
     a.loadSessionFile();
     return a;
   };
+
+  function sessionMtime(name) {
+    try { return fs.statSync(store.sessionPath(name)).mtimeMs; } catch { return 0; }
+  }
+
+  function getAccount(name) {
+    if (!byName.has(name)) {
+      const entry = store.get(name);
+      if (!entry) return null;
+      const acc = makeAccount(new Account({ appUrl: cfg.appUrl, sessionPath: store.sessionPath(name), key: entry.key }));
+      acc.name = name;
+      acc.label = name;
+      acc._sessionMtime = sessionMtime(name);
+      byName.set(name, acc);
+    }
+    const acc = byName.get(name);
+    // Pick up a session file replaced behind our back (panel login, manual scp).
+    const m = sessionMtime(name);
+    if (m && m !== acc._sessionMtime) {
+      acc.reloadSession();
+      acc._sessionMtime = m;
+    }
+    return acc;
+  }
+
+  // Rebuild the key -> account map from accounts.json (cheap: one stat when unchanged).
+  function syncAccounts() {
+    store.reloadIfChanged();
+    const list = store.list();
+    storeCount = list.length;
+    accounts.clear();
+    for (const entry of list) {
+      const acc = getAccount(entry.name);
+      if (!acc) continue;
+      acc.key = entry.key;
+      acc.name = entry.name;
+      if (entry.enabled) accounts.set(entry.key, acc);
+    }
+    for (const name of [...byName.keys()]) if (!store.get(name)) byName.delete(name);
+    return list;
+  }
+
+  // Admin panel needs every account, enabled or not.
+  const listAccounts = () => syncAccounts().map((e) => getAccount(e.name)).filter(Boolean);
 
   if (cfg.accounts.length) {
     for (const { key, sessionPath } of cfg.accounts) {
@@ -49,7 +112,7 @@ function buildApp(cfg) {
       accountBySessionPath.set(sessionPath, acc);
     }
   }
-  if (!accounts.size) {
+  if (!cfg.accounts.length && !store.list().length) {
     defaultAccount = makeAccount(
       cfg.defaultToken
         ? new Account({ appUrl: cfg.appUrl, token: cfg.defaultToken, key: cfg.clientKey })
@@ -57,6 +120,8 @@ function buildApp(cfg) {
     );
     if (cfg.clientKey) accounts.set(cfg.clientKey, defaultAccount);
   }
+
+  const admin = createAdmin({ cfg, store, getAccount, listAccounts, stats, reqLog, log });
 
   // ---- rate limiters per client key ------------------------------------
   const rateLimiters = new Map();
@@ -83,12 +148,14 @@ function buildApp(cfg) {
   function resolveAccount(req) {
     const key = clientKeyOf(req);
     if (!key) return { key: null, account: null };
+    syncAccounts();
     if (accounts.size) {
       const acc = accounts.get(key);
       if (acc) return { key, account: acc };
+      // single default account: any non-empty key is accepted
+      if (!storeCount && !cfg.accounts.length && defaultAccount) return { key, account: defaultAccount };
       return { key, account: null };
     }
-    // single default account: any non-empty key is accepted
     return { key, account: defaultAccount };
   }
 
@@ -105,6 +172,18 @@ function buildApp(cfg) {
   }
 
   function requestLog(req, res, { account, model, tokens, durationMs, status }) {
+    const finalStatus = status ?? res.statusCode;
+    const name = account?.name || account?.label || null;
+    if (name) {
+      const s = stats.get(name) || { requests: 0, errors: 0, tokens: 0 };
+      s.requests += 1;
+      if (finalStatus >= 400) s.errors += 1;
+      if (Number.isFinite(tokens)) s.tokens += tokens;
+      s.lastAt = Date.now();
+      s.lastStatus = finalStatus;
+      stats.set(name, s);
+    }
+    reqLog.push({ ts: Date.now(), account: name, model: model || null, status: finalStatus, ms: durationMs ?? null, tokens: Number.isFinite(tokens) ? tokens : null });
     if (cfg.logLevel === 0) return;
     log(
       "info",
@@ -484,21 +563,26 @@ function buildApp(cfg) {
     const url = new URL(req.url, "http://localhost");
     const pathname = url.pathname;
 
+    // Admin panel (page + JSON API). Mounted before the API router.
+    if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+      return admin.handle(req, res, pathname, req.method);
+    }
+
     if (pathname === "/healthz" || pathname === "/") {
-      const { account } = resolveAccount(req);
-      account?.loadSessionFile();
+      syncAccounts();
+      const pool = storeCount ? listAccounts() : (resolveAccount(req).account ? [resolveAccount(req).account] : []);
       return sendJSON(res, 200, {
         ok: true,
         service: "perchai-2api",
         backend: cfg.backend || "http",
         ...(cfg.backend === "cli" ? { capabilities: { textChat: true, stream: "buffered", tools: false, embeddings: false, accountUsage: false } } : {}),
         uptimeSec: Math.round(process.uptime()),
-        ...(account ? { accounts: [{
-          label: account.label,
+        ...(pool.length ? { accounts: pool.map((account) => ({
+          label: account.name || account.label,
           configured: !!account.session?.accessToken,
           activeRequests: (cfg.backend === "cli" ? account.cliSemaphore : account.semaphore)?.active ?? 0,
           concurrencyDepth: (cfg.backend === "cli" ? account.cliSemaphore : account.semaphore)?.depth ?? 0,
-        }] } : {}),
+        })) } : {}),
       });
     }
 
@@ -552,6 +636,7 @@ function startServer(cfg = null) {
     } else {
       log("info", `default account: ${config.defaultToken ? "PERCH_MODEL_CALL_PROXY_TOKEN" : config.defaultSessionPath}`);
     }
+    log("info", `admin panel: http://${config.host}:${config.port}/admin (token: ${path.join(config.dataDir, "admin-token.txt")})`);
     const concurrency = config.backend === "cli" ? config.cliMaxConcurrency : config.maxConcurrency;
     log("info", `concurrency: ${concurrency}${config.rpm ? `, rate limit: ${config.rpm} rpm/key` : ""}`);
   });

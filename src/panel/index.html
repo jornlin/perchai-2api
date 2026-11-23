@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perch2API · 控制台</title>
+<link rel="stylesheet" href="/admin/style.css">
+</head>
+<body>
+<div id="gate" class="gate hidden">
+  <div class="gate-box">
+    <h1>Perch2API 控制台</h1>
+    <p class="muted">输入管理令牌（服务器 <code>data/admin-token.txt</code>）</p>
+    <input id="gate-token" type="password" placeholder="admin token" autocomplete="current-password">
+    <button id="gate-go" class="btn primary">进入</button>
+    <p id="gate-err" class="err"></p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>Perch2API</strong>
+      <span id="backend" class="badge"></span>
+    </div>
+    <div class="top-right">
+      <span class="muted mono" id="uptime"></span>
+      <button id="refresh" class="btn ghost">刷新</button>
+      <button id="logout" class="btn ghost">退出</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis"></section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>账号</h2>
+        <div class="card-actions">
+          <input id="new-name" class="input" placeholder="新账号名，如 acc2">
+          <button id="add-account" class="btn primary">+ 添加账号</button>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th>状态</th><th>账号</th><th>邮箱</th><th>套餐</th><th>令牌到期</th>
+            <th class="n">并发</th><th class="n">请求</th><th class="n">错误</th><th>API Key</th><th>操作</th>
+          </tr></thead>
+          <tbody id="acc-body"></tbody>
+        </table>
+      </div>
+      <p class="empty hidden" id="acc-empty">还没有账号。上面输入名字后添加，然后点「登录」按提示完成 OAuth。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>最近请求</h2><span class="muted mono" id="log-count"></span></div>
+      <div class="tbl-wrap req-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>账号</th><th>模型</th><th class="n">状态</th><th class="n">耗时</th><th class="n">tokens</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+      <p class="empty hidden" id="log-empty">暂无请求。</p>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-title">登录账号</h3>
+      <button id="modal-close" class="btn ghost">关闭</button>
+    </div>
+    <div class="modal-body">
+      <ol class="steps">
+        <li>点下面的按钮打开 Perch 登录页，用该账号的 Google / GitHub 完成登录。</li>
+        <li>登录后会跳到一个 <code>http://127.0.0.1:18081/callback?code=…</code> 的地址，页面打不开是正常的。</li>
+        <li>把浏览器地址栏那一整条地址复制，粘贴到下面。</li>
+      </ol>
+      <div class="row">
+        <button id="open-login" class="btn primary">打开登录页</button>
+        <select id="login-provider" class="input">
+          <option value="google">Google</option>
+          <option value="github">GitHub</option>
+        </select>
+      </div>
+      <input id="login-url" class="input mono" readonly placeholder="登录链接会出现在这里">
+      <textarea id="callback" class="input mono" rows="3" placeholder="粘贴 http://127.0.0.1:18081/callback?code=..."></textarea>
+      <button id="finish-login" class="btn primary">完成登录</button>
+      <p id="login-err" class="err"></p>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/admin/app.js"></script>
+</body>
+</html>

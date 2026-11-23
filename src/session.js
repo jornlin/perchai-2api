@@ -168,11 +168,22 @@ class Account {
     }
   }
 
+  // Re-read the session file (admin panel swapped credentials on disk).
+  reloadSession() {
+    this.session = null;
+    this.ticket = null;
+    this.ticketPromise = null;
+    this.ticketFailure = null;
+    this.loadSessionFile();
+  }
+
   async getAuthConfig() {
     if (this.authConfig) return this.authConfig;
     const { res, json } = await upstreamJson(`${this.appUrl}/api/perch-terminal/cli-auth/config`, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      // The CLI identity makes Perch serve the edge auth backend; the direct
+      // Supabase project rejects these credentials.
+      headers: { Accept: "application/json", "User-Agent": this.userAgent || "perchai-cli/2.4.125 (perchai-2api)" },
       connectTimeoutMs: 10_000,
       totalTimeoutMs: 10_000,
     });
@@ -180,6 +191,7 @@ class Account {
     const c = json;
     if (!c || c.ok !== true || !c.supabaseUrl || !c.supabaseAnonKey) throw new Error("cli-auth/config returned no supabase credentials");
     this.authConfig = c;
+    this.authBase = c.backend === "edge" ? `${this.appUrl}/data-edge` : c.supabaseUrl;
     return c;
   }
 
@@ -202,7 +214,7 @@ class Account {
     const cfg = await this.getAuthConfig().catch(() => null);
     if (!cfg) return false;
     try {
-      const { res, json } = await upstreamJson(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+      const { res, json } = await upstreamJson(`${this.authBase || cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

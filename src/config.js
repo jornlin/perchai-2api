@@ -51,6 +51,9 @@ function readEnv() {
     upstreamSockets: Math.max(2, Number(process.env.PERCH_UPSTREAM_SOCKETS || 16)),
     userAgent: `perchai-cli/${process.env.PERCH_CLI_VERSION || "2.4.125"} (perchai-2api)`,
     logLevel: Number(process.env.PERCH_LOG_LEVEL || 1), // 0=quiet 1=info 2=debug
+    // Admin panel: account registry lives next to the session files.
+    dataDir: process.env.PERCH_DATA_DIR || process.env.PERCH_CLI_AUTH_DIR || path.dirname(DEFAULT_SESSION_FILE),
+    adminToken: process.env.PERCH_ADMIN_TOKEN?.trim() || null,
   };
   if (!["http", "cli"].includes(cfg.backend)) throw new Error("PERCH_BACKEND must be http or cli");
   if (!Number.isSafeInteger(cfg.cliTimeoutMs) || cfg.cliTimeoutMs < 1) throw new Error("PERCH_CLI_TIMEOUT_MS must be a positive integer");
